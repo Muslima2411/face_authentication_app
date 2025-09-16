@@ -9,7 +9,8 @@ import 'database_service.dart';
 
 class FaceAuthenticationService {
   static FaceAuthenticationService? _instance;
-  static FaceAuthenticationService get instance => _instance ??= FaceAuthenticationService._();
+  static FaceAuthenticationService get instance =>
+      _instance ??= FaceAuthenticationService._();
   FaceAuthenticationService._();
 
   final double _authenticationThreshold = 0.6;
@@ -23,7 +24,7 @@ class FaceAuthenticationService {
 
   Future<AuthenticationResult> authenticate(String userId) async {
     final stopwatch = Stopwatch()..start();
-    
+
     try {
       // Check if user is locked out
       if (_failedAttempts >= _maxFailedAttempts) {
@@ -49,7 +50,9 @@ class FaceAuthenticationService {
       }
 
       // Detect face
-      final faceResult = await FaceDetectionService.instance.detectFace(imageBytes);
+      final faceResult = await FaceDetectionService.instance.detectFace(
+        imageBytes,
+      );
       if (faceResult == null) {
         return AuthenticationResult(
           status: AuthStatus.failure,
@@ -74,7 +77,9 @@ class FaceAuthenticationService {
       }
 
       // Get stored templates
-      final storedTemplates = await DatabaseService.instance.getTemplates(userId);
+      final storedTemplates = await DatabaseService.instance.getTemplates(
+        userId,
+      );
       if (storedTemplates.isEmpty) {
         return AuthenticationResult(
           status: AuthStatus.error,
@@ -89,7 +94,10 @@ class FaceAuthenticationService {
       double bestSimilarity = 0.0;
       for (final template in storedTemplates) {
         final similarity = FeatureExtractionService.instance
-            .calculateCosineSimilarity(capturedFeatures.features, template.features);
+            .calculateCosineSimilarity(
+              capturedFeatures.features,
+              template.features,
+            );
         if (similarity > bestSimilarity) {
           bestSimilarity = similarity;
         }
@@ -131,35 +139,75 @@ class FaceAuthenticationService {
 
   Future<bool> enrollUser(String userId) async {
     try {
+      print('=== ENROLLMENT START for userId: $userId ===');
       final List<FeatureVector> templates = [];
 
       // Capture multiple samples for robustness
       for (int i = 0; i < 3; i++) {
+        print('Capturing sample ${i + 1}/3...');
         await Future.delayed(Duration(seconds: 1)); // Give user time to adjust
 
         final imageBytes = await CameraService.instance.captureFace();
-        if (imageBytes == null) continue;
+        if (imageBytes == null) {
+          print('Sample ${i + 1}: Failed to capture image');
+          continue;
+        }
+        print('Sample ${i + 1}: Image captured (${imageBytes.length} bytes)');
 
-        final faceResult = await FaceDetectionService.instance.detectFace(imageBytes);
-        if (faceResult == null) continue;
+        final faceResult = await FaceDetectionService.instance.detectFace(
+          imageBytes,
+        );
+        if (faceResult == null) {
+          print('Sample ${i + 1}: No face detected');
+          continue;
+        }
+        print(
+          'Sample ${i + 1}: Face detected with confidence ${faceResult.confidence}',
+        );
 
         final features = await FeatureExtractionService.instance
             .extractFeatures(imageBytes, userId);
         if (features != null) {
           templates.add(features);
+          print(
+            'Sample ${i + 1}: Features extracted (${features.features.length} features)',
+          );
+        } else {
+          print('Sample ${i + 1}: Feature extraction failed');
         }
       }
 
+      print('Total templates captured: ${templates.length}');
       if (templates.isEmpty) {
+        print('=== ENROLLMENT FAILED: No templates captured ===');
         return false;
       }
 
       // Store templates
+      int storedCount = 0;
       for (final template in templates) {
-        await DatabaseService.instance.storeTemplate(template);
+        final stored = await DatabaseService.instance.storeTemplate(template);
+        if (stored) {
+          storedCount++;
+          print('Template stored successfully for userId: ${template.userId}');
+        } else {
+          print('Failed to store template for userId: ${template.userId}');
+        }
       }
 
-      return true;
+      print(
+        '=== ENROLLMENT COMPLETE: $storedCount/${templates.length} templates stored ===',
+      );
+
+      // Verify storage by immediately querying
+      final storedTemplates = await DatabaseService.instance.getTemplates(
+        userId,
+      );
+      print(
+        'Verification: Found ${storedTemplates.length} stored templates for userId: $userId',
+      );
+
+      return storedCount > 0;
     } catch (e) {
       print('Enrollment error: $e');
       return false;

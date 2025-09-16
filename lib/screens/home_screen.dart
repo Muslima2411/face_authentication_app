@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:glassmorphism/glassmorphism.dart';
 import '../services/face_authentication_service.dart';
 import '../config/app_theme.dart';
+import '../services/camera_service.dart'; // Import CameraService
 
 class HomeScreen extends StatefulWidget {
   @override
@@ -52,6 +53,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _fadeController.dispose();
     _slideController.dispose();
     _userIdController.dispose();
+    CameraService.instance.dispose(); // Dispose camera when leaving home screen
     super.dispose();
   }
 
@@ -452,30 +454,40 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  void _navigateToEnrollment() {
+  Future<void> _navigateToEnrollment() async {
     if (_userIdController.text.trim().isEmpty) {
       _showErrorSnackBar('Please enter a User ID');
       return;
     }
 
-    Navigator.pushNamed(
-      context,
-      '/enrollment',
-      arguments: _userIdController.text.trim(),
-    );
+    await CameraService.instance
+        .forceDispose(); // Dispose camera before navigation
+
+    if (mounted) {
+      Navigator.pushNamed(
+        context,
+        '/enrollment',
+        arguments: _userIdController.text.trim(),
+      );
+    }
   }
 
-  void _navigateToAuthentication() {
+  Future<void> _navigateToAuthentication() async {
     if (_userIdController.text.trim().isEmpty) {
       _showErrorSnackBar('Please enter a User ID');
       return;
     }
 
-    Navigator.pushNamed(
-      context,
-      '/authentication',
-      arguments: _userIdController.text.trim(),
-    );
+    await CameraService.instance
+        .forceDispose(); // Dispose camera before navigation
+
+    if (mounted) {
+      Navigator.pushNamed(
+        context,
+        '/authentication',
+        arguments: _userIdController.text.trim(),
+      );
+    }
   }
 
   void _showErrorSnackBar(String message) {

@@ -14,59 +14,116 @@ class AuthenticationScreen extends StatefulWidget {
 
 class _AuthenticationScreenState extends State<AuthenticationScreen>
     with TickerProviderStateMixin {
-  bool _isAuthenticating = false;
-  String? _userId;
-  String _statusMessage = 'Position your face in the frame';
-
-  late AnimationController _scanAnimationController;
+  late AnimationController _scanController;
   late AnimationController _pulseController;
   late AnimationController _fadeController;
   late Animation<double> _scanAnimation;
   late Animation<double> _pulseAnimation;
   late Animation<double> _fadeAnimation;
 
+  bool _isAuthenticating = false;
+  bool _isInitializing = true;
+  String _statusMessage = 'Initializing camera...';
+  AuthenticationResult? _lastResult;
+
   @override
   void initState() {
     super.initState();
-    _scanAnimationController = AnimationController(
-      duration: Duration(seconds: 2),
+    _initializeAnimations();
+    _initializeCamera();
+  }
+
+  void _initializeAnimations() {
+    _scanController = AnimationController(
+      duration: const Duration(seconds: 2),
       vsync: this,
     );
     _pulseController = AnimationController(
-      duration: Duration(milliseconds: 1500),
+      duration: const Duration(milliseconds: 1000),
       vsync: this,
     );
     _fadeController = AnimationController(
-      duration: Duration(milliseconds: 800),
+      duration: const Duration(milliseconds: 500),
       vsync: this,
     );
 
     _scanAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _scanAnimationController, curve: Curves.linear),
+      CurvedAnimation(parent: _scanController, curve: Curves.easeInOut),
     );
-    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(
+
+    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.1).animate(
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
-    _fadeAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(parent: _fadeController, curve: Curves.easeOut));
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _fadeController, curve: Curves.easeInOut),
+    );
+  }
 
-    _fadeController.forward();
+  Future<void> _initializeCamera() async {
+    setState(() {
+      _isInitializing = true;
+      _statusMessage = 'Initializing camera...';
+    });
+
+    try {
+      // Force reinitialize camera to ensure fresh state
+      await CameraService.instance.reinitialize();
+
+      if (CameraService.instance.isInitialized) {
+        setState(() {
+          _isInitializing = false;
+          _statusMessage = 'Position your face within the guide';
+        });
+        _fadeController.forward();
+      } else {
+        setState(() {
+          _isInitializing = false;
+          _statusMessage = 'Camera initialization failed';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _isInitializing = false;
+        _statusMessage = 'Camera error: ${e.toString()}';
+      });
+    }
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _userId = ModalRoute.of(context)?.settings.arguments as String?;
+    final userId = ModalRoute.of(context)?.settings.arguments as String?;
   }
 
   @override
   void dispose() {
-    _scanAnimationController.dispose();
+    // Stop all animations first
+    _scanController.stop();
+    _pulseController.stop();
+    _fadeController.stop();
+
+    // Reset animation states
+    _scanController.reset();
+    _pulseController.reset();
+    _fadeController.reset();
+
+    // Dispose animation controllers
+    _scanController.dispose();
     _pulseController.dispose();
     _fadeController.dispose();
+
+    // Handle camera disposal asynchronously to avoid blocking
+    _disposeCamera();
+
     super.dispose();
+  }
+
+  void _disposeCamera() async {
+    try {
+      await CameraService.instance.forceDispose();
+    } catch (e) {
+      print('Camera disposal error in authentication screen: $e');
+    }
   }
 
   @override
@@ -135,7 +192,7 @@ class _AuthenticationScreenState extends State<AuthenticationScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Authenticating: $_userId',
+                  'Authenticating: ',
                   style: theme.textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
@@ -496,22 +553,39 @@ class _AuthenticationScreenState extends State<AuthenticationScreen>
   }
 
   Future<void> _startAuthentication() async {
-    if (_userId == null) return;
+    if (CameraService.instance.controller == null ||
+        !CameraService.instance.isInitialized ||
+        CameraService.instance.isDisposing ||
+        _isAuthenticating) {
+      setState(() {
+        _statusMessage = 'Camera not ready. Please wait...';
+      });
+      return;
+    }
+
+    // Get userId from route arguments
+    final userId = ModalRoute.of(context)?.settings.arguments as String? ?? '';
+    if (userId.isEmpty) {
+      setState(() {
+        _statusMessage = 'Error: No user ID provided';
+      });
+      return;
+    }
 
     setState(() {
       _isAuthenticating = true;
       _statusMessage = 'Analyzing face... Please hold still';
     });
 
-    _scanAnimationController.repeat();
+    _scanController.repeat();
     _pulseController.repeat(reverse: true);
 
     try {
       final result = await FaceAuthenticationService.instance.authenticate(
-        _userId!,
+        userId,
       );
 
-      _scanAnimationController.stop();
+      _scanController.stop();
       _pulseController.stop();
 
       setState(() {
@@ -520,7 +594,7 @@ class _AuthenticationScreenState extends State<AuthenticationScreen>
 
       _handleAuthenticationResult(result);
     } catch (e) {
-      _scanAnimationController.stop();
+      _scanController.stop();
       _pulseController.stop();
       setState(() {
         _isAuthenticating = false;
@@ -857,7 +931,7 @@ class _AuthenticationScreenState extends State<AuthenticationScreen>
           ),
           Text(
             value,
-            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Colors.black,),
           ),
         ],
       ),

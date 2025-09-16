@@ -22,11 +22,7 @@ class DatabaseService {
 
   Future<Database> _initDatabase() async {
     String path = join(await getDatabasesPath(), 'face_auth.db');
-    return await openDatabase(
-      path,
-      version: 1,
-      onCreate: _onCreate,
-    );
+    return await openDatabase(path, version: 1, onCreate: _onCreate);
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -43,14 +39,28 @@ class DatabaseService {
 
   Future<bool> storeTemplate(FeatureVector template) async {
     try {
+      print(
+        '=== DATABASE: Storing template for userId: ${template.userId} ===',
+      );
       final db = await database;
       final templateData = template.toMap();
-      
+
       // Create hash for integrity verification
       final hash = _createHash(templateData['features']);
       templateData['hash'] = hash;
 
-      await db.insert(_tableName, templateData);
+      final result = await db.insert(_tableName, templateData);
+      print('Template stored with ID: $result');
+
+      // Verify the insert by querying back
+      final count = await db.rawQuery(
+        'SELECT COUNT(*) as count FROM $_tableName WHERE userId = ?',
+        [template.userId],
+      );
+      print(
+        'Total templates for userId ${template.userId}: ${count.first['count']}',
+      );
+
       return true;
     } catch (e) {
       print('Template storage error: $e');
@@ -60,6 +70,7 @@ class DatabaseService {
 
   Future<List<FeatureVector>> getTemplates(String userId) async {
     try {
+      print('=== DATABASE: Retrieving templates for userId: $userId ===');
       final db = await database;
       final List<Map<String, dynamic>> maps = await db.query(
         _tableName,
@@ -67,14 +78,35 @@ class DatabaseService {
         whereArgs: [userId],
       );
 
-      return maps.map((map) {
-        // Verify hash integrity
-        final expectedHash = _createHash(map['features']);
-        if (expectedHash != map['hash']) {
-          throw Exception('Template integrity check failed');
+      print('Found ${maps.length} raw database records for userId: $userId');
+
+      final templates = <FeatureVector>[];
+      for (int i = 0; i < maps.length; i++) {
+        final map = maps[i];
+        print(
+          'Processing record $i: userId=${map['userId']}, timestamp=${map['timestamp']}',
+        );
+
+        try {
+          // Verify hash integrity
+          final expectedHash = _createHash(map['features']);
+          if (expectedHash != map['hash']) {
+            print('WARNING: Template integrity check failed for record $i');
+            continue;
+          }
+
+          final template = FeatureVector.fromMap(map);
+          templates.add(template);
+          print(
+            'Successfully loaded template $i with ${template.features.length} features',
+          );
+        } catch (e) {
+          print('Error processing record $i: $e');
         }
-        return FeatureVector.fromMap(map);
-      }).toList();
+      }
+
+      print('=== DATABASE: Returning ${templates.length} valid templates ===');
+      return templates;
     } catch (e) {
       print('Template retrieval error: $e');
       return [];
@@ -84,11 +116,7 @@ class DatabaseService {
   Future<bool> deleteTemplates(String userId) async {
     try {
       final db = await database;
-      await db.delete(
-        _tableName,
-        where: 'userId = ?',
-        whereArgs: [userId],
-      );
+      await db.delete(_tableName, where: 'userId = ?', whereArgs: [userId]);
       return true;
     } catch (e) {
       print('Template deletion error: $e');

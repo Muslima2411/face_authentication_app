@@ -13,37 +13,77 @@ class EnrollmentScreen extends StatefulWidget {
 
 class _EnrollmentScreenState extends State<EnrollmentScreen>
     with TickerProviderStateMixin {
-  bool _isEnrolling = false;
-  String? _userId;
-  String _currentStep = 'Position your face in the frame';
-  int _captureCount = 0;
-  final int _totalCaptures = 3;
-
   late AnimationController _pulseController;
   late AnimationController _progressController;
   late Animation<double> _pulseAnimation;
   late Animation<double> _progressAnimation;
 
+  bool _isEnrolling = false;
+  bool _isInitializing = true;
+  String _statusMessage = 'Initializing camera...';
+  double _enrollmentProgress = 0.0;
+  int _capturedSamples = 0;
+  final int _requiredSamples = 5;
+  String? _userId;
+  String _currentStep = 'Position your face in the frame';
+  int _captureCount = 0;
+  final int _totalCaptures = 3;
+
   @override
   void initState() {
     super.initState();
+    _initializeAnimations();
+    _initializeCamera();
+  }
+
+  void _initializeAnimations() {
     _pulseController = AnimationController(
-      duration: Duration(seconds: 2),
+      duration: const Duration(seconds: 2),
       vsync: this,
     );
     _progressController = AnimationController(
-      duration: Duration(milliseconds: 800),
+      duration: const Duration(milliseconds: 300),
       vsync: this,
     );
 
-    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.1).animate(
+    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
+
     _progressAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(parent: _progressController, curve: Curves.easeOut),
     );
 
     _pulseController.repeat(reverse: true);
+  }
+
+  Future<void> _initializeCamera() async {
+    setState(() {
+      _isInitializing = true;
+      _statusMessage = 'Initializing camera...';
+    });
+
+    try {
+      // Force reinitialize camera to ensure fresh state
+      await CameraService.instance.reinitialize();
+
+      if (CameraService.instance.isInitialized) {
+        setState(() {
+          _isInitializing = false;
+          _statusMessage = 'Position your face within the guide';
+        });
+      } else {
+        setState(() {
+          _isInitializing = false;
+          _statusMessage = 'Camera initialization failed';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _isInitializing = false;
+        _statusMessage = 'Camera error: ${e.toString()}';
+      });
+    }
   }
 
   @override
@@ -53,9 +93,12 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
   }
 
   @override
-  void dispose() {
+  void dispose() async {
     _pulseController.dispose();
     _progressController.dispose();
+
+    // Properly dispose camera when leaving screen
+    await CameraService.instance.forceDispose();
     super.dispose();
   }
 
